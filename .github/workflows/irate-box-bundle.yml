@@ -1,0 +1,125 @@
+name: Irate-Box app bundle (svg)
+
+# Builds upstream SVG-Edit at the commit the Irate-Box pinned, trimmed and wrapped by the hub's
+# apps/svgedit/, and uploads it as irate-box-svgedit-<commit>. The hub's librarian installs the
+# artifact (through nightly.link, or with a GitHub token). No source changes: this fork is the
+# CI vehicle only. The bundle carries irate-box-bundle.json and SHA256SUMS.
+#
+# The hub's wrapper and trim live in NomDeTom/irate-box and are checked out at `hub_ref`, so a
+# change to either takes effect without touching this file. Artifacts expire after 90 days, so
+# this also runs monthly.
+
+on:
+  push:
+    branches: [master]
+  schedule:
+    - cron: '23 5 1 * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit of SVG-Edit to build
+        default: c44f061d2f9a626d2771cc931298af5a45522d87
+      hub_ref:
+        description: irate-box branch, tag or commit holding apps/svgedit
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: irate-box-bundle
+  cancel-in-progress: true
+
+env:
+  PINNED_COMMIT: c44f061d2f9a626d2771cc931298af5a45522d87
+  SOURCE_REPOSITORY: SVG-Edit/svgedit
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: SVG-Edit at the pin
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref || env.PINNED_COMMIT }}
+      - name: The hub's wrapper and trim
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: NomDeTom/irate-box
+          ref: ${{ inputs.hub_ref || 'main' }}
+          path: hub
+      - name: Record the commit checked out
+        run: |
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "SHORT=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Install (no dependency install scripts)
+        # The native Rolldown binding is an npm optional dependency, not a postinstall, so the
+        # build needs no install script at all.
+        run: npm ci --ignore-scripts
+      - name: Build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: npm run build
+      - name: Trim to the hub's set
+        run: python3 hub/apps/svgedit/trim.py dist/editor
+      - name: The hub's page and extensions
+        run: |
+          cp hub/apps/svgedit/index.html dist/editor/index.html
+          cp hub/apps/svgedit/hub.js dist/editor/hub.js
+          cp hub/apps/svgedit/ext-hub-store.js dist/editor/ext-hub-store.js
+      - name: Third-party notices
+        run: |
+          out="dist/editor/THIRD-PARTY-NOTICES.txt"
+          {
+            echo "SVG-Edit, built for the Irate-Box hub from ${SOURCE_REPOSITORY} at ${SOURCE_COMMIT}."
+            echo "Source: https://github.com/${SOURCE_REPOSITORY}/tree/${SOURCE_COMMIT}"
+            echo
+            echo "The editor is MIT licensed (LICENSE-MIT.txt beside this file)."
+            echo "The bundled components and their licenses, from the source's licenseInfo.json:"
+            echo
+            python3 - <<'PY'
+          import json
+          info = json.load(open("licenseInfo.json", encoding="utf-8"))
+          print("Bundled root packages:", ", ".join(info.get("bundledRootPackages", [])))
+          for license_name, files in info.get("filesByLicense", {}).items():
+              print(f"\n{license_name}:")
+              for name in files:
+                  print(f"  {name}")
+          PY
+          } > "$out"
+          cp LICENSE-MIT.txt dist/editor/LICENSE-MIT.txt
+          cp AUTHORS dist/editor/AUTHORS
+          du -h "$out"
+      - name: Record what was built
+        run: |
+          cat > "dist/editor/irate-box-bundle.json" <<JSON
+          {"app": "svg", "repository": "${GITHUB_REPOSITORY}", "ref": "pinned", "commit": "${SOURCE_COMMIT}",
+           "built": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "source": "https://github.com/${SOURCE_REPOSITORY}/tree/${SOURCE_COMMIT}",
+           "run": ${{ github.run_id }}}
+          JSON
+          du -sh dist/editor
+      - name: The bundle's checks
+        run: |
+          cd dist/editor
+          find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          SVGEDIT_BUNDLE="$PWD" python3 "$GITHUB_WORKSPACE/hub/tests/sim_svgedit_bundle.py"
+      - name: Size guard (raw at most 3.3 MB, gzip at most 0.8 MB)
+        run: |
+          cd dist/editor
+          raw=$(du -sb . | cut -f1)
+          gzip=$(tar -czf - . | wc -c)
+          echo "raw ${raw} bytes, gzip ${gzip} bytes"
+          test "$raw" -le 3300000
+          test "$gzip" -le 800000
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: irate-box-svgedit-${{ env.SHORT }}
+          path: dist/editor
+          retention-days: 90
+          compression-level: 6
+          if-no-files-found: error
