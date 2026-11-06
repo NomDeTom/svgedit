@@ -63,13 +63,12 @@ jobs:
         run: npm run build
       - name: Trim to the hub's set
         run: python3 hub/apps/svgedit/trim.py dist/editor
-      - name: The hub's page and extension
+      - name: The hub's page and extensions
         run: |
           cp hub/apps/svgedit/index.html dist/editor/index.html
           cp hub/apps/svgedit/hub.js dist/editor/hub.js
-          if [ -f hub/apps/svgedit/ext-hub-store.js ]; then
-            cp hub/apps/svgedit/ext-hub-store.js dist/editor/ext-hub-store.js
-          fi
+          cp hub/apps/svgedit/lock.js dist/editor/lock.js
+          cp hub/apps/svgedit/ext-hub-store.js dist/editor/ext-hub-store.js
       - name: Third-party notices
         run: |
           out="dist/editor/THIRD-PARTY-NOTICES.txt"
