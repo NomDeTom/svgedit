@@ -31,7 +31,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SOURCE_COMMIT: c44f061d2f9a626d2771cc931298af5a45522d87
+  PINNED_COMMIT: c44f061d2f9a626d2771cc931298af5a45522d87
   SOURCE_REPOSITORY: SVG-Edit/svgedit
 
 jobs:
@@ -42,17 +42,20 @@ jobs:
       - name: SVG-Edit at the pin
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ inputs.ref || env.SOURCE_COMMIT }}
+          ref: ${{ inputs.ref || env.PINNED_COMMIT }}
       - name: The hub's wrapper and trim
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: NomDeTom/irate-box
           ref: ${{ inputs.hub_ref || 'main' }}
           path: hub
+      - name: Record the commit checked out
+        run: |
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "SHORT=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-          cache: npm
       - name: Install (no dependency install scripts)
         # The native Rolldown binding is an npm optional dependency, not a postinstall, so the
         # build needs no install script at all.
@@ -98,7 +101,6 @@ jobs:
            "built": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "source": "https://github.com/${SOURCE_REPOSITORY}/tree/${SOURCE_COMMIT}",
            "run": ${{ github.run_id }}}
           JSON
-          echo "SHORT=${SOURCE_COMMIT:0:7}" >> "$GITHUB_ENV"
           du -sh dist/editor
       - name: The bundle's checks
         run: |
